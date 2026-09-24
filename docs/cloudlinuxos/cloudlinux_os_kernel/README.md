@@ -304,6 +304,59 @@ Setting this parameter will deny any process in LVE to resolve symlinks that is 
 Default is true.
 
 
+## Per-account System V IPC isolation
+
+::: tip Note
+Per-account System V IPC isolation is disabled by default for the CloudLinux OS.
+:::
+
+CloudLinux OS can give each hosting account its own private System V IPC namespace, covering shared memory segments, semaphore arrays, and message queues. With it enabled, the IPC objects an account's applications create belong to that account, alongside the mount (CageFS) and process (PID) views that CloudLinux OS already keeps per account.
+
+A process joins its account's IPC namespace when it enters CageFS, so the behaviour is consistent whether the process starts from SSH, cron, or a web request.
+
+#### **kernel.lve_ipc_isolation**
+
+To give each account its own System V IPC namespace, enable:
+
+```
+kernel.lve_ipc_isolation=1
+```
+
+Default:
+
+```
+kernel.lve_ipc_isolation = 0
+```
+
+| | |
+|-|-|
+|<span class="notranslate"> _kernel.lve_ipc_isolation = 0_ </span> | all accounts use one shared System V IPC namespace (default)|
+|<span class="notranslate"> _kernel.lve_ipc_isolation = 1_ </span> | each per-account <span class="notranslate"> LVE </span> gets its own System V IPC namespace|
+
+The setting applies to accounts whose <span class="notranslate"> LVE </span> is created after it is enabled, so a brief pause in account activity (or a reboot) applies it to every account. Accounts without <span class="notranslate"> CageFS </span> use the shared namespace. System-wide services such as the database server, MySQL Governor, the web server master process, and control-panel daemons continue to use the shared namespace, so functionality that relies on it keeps working.
+
+To enable it persistently, edit the file _/etc/sysctl.conf_ , add the line:
+
+```
+kernel.lve_ipc_isolation = 1
+```
+
+And execute:
+
+```
+sysctl -p
+```
+
+To see which IPC namespaces exist on the server, run:
+
+```
+lsns -t ipc
+```
+
+::: tip Note
+Requires <span class="notranslate"> kmod-lve </span> 2.1-79 or later, with the matching <span class="notranslate"> liblve </span> and <span class="notranslate"> lve-utils </span> packages. On fresh installs <span class="notranslate"> lve-utils </span> registers the parameter (disabled) so it persists across reboots.
+:::
+
 ## File change API
 
 ### General
