@@ -6245,6 +6245,184 @@ yum install cagefs
 
 
 
+### Shared node_modules Store
+
+* [Store requirements](./#store-requirements)
+* [How the Store works](./#how-the-store-works)
+* [Enabling the Store](./#enabling-the-store)
+* [Using the Store](./#using-the-store)
+* [Converting existing applications](./#converting-existing-applications)
+* [Store configuration](./#store-configuration)
+* [Monitoring and maintenance](./#monitoring-and-maintenance)
+* [Disabling the Store](./#disabling-the-store)
+* [Store limitations](./#store-limitations)
+
+The <span class="notranslate">Shared node_modules Store</span> lets <span class="notranslate">Node.js Selector</span> applications reuse installed packages from a shared cache. Packages already in the cache do not need to be downloaded or stored again for each application.
+
+Available since <span class="notranslate">LVE Manager 7.11.49-1</span>, the feature is **off by default**. The administrator enables it for the server. Applications keep using their selected Node.js version.
+
+#### **Store requirements**
+
+* <span class="notranslate">LVE Manager 7.11.49-1</span> or later, with <span class="notranslate">`cl-bun`</span> 1.4.x (first release: `1.4.0-1`). The `enable` command installs `cl-bun` if needed from the server's enabled repositories.
+* CloudLinux OS 7–10 or Ubuntu 22.04; **x86_64 only**.
+* CloudLinux <span class="notranslate">Node.js Selector</span>, on a supported panel or a custom panel that uses its API.
+* `fs.protected_hardlinks = 1`.
+* A storage directory on the same filesystem as each account home that will use the Store: hardlinks cannot cross filesystems. The default store is <span class="notranslate">`/var/lib/cl-node-modules-storage`</span>.
+
+#### **How the Store works**
+
+When you install dependencies, the Store reuses packages already in its cache and downloads any missing ones. Packages that need extra setup or a build use private copies prepared for each application.
+
+Shared dependency files are read-only for the account. Use npm to update dependencies.
+
+**Disk space and inode quotas.** Shared dependency files do not count toward the account's disk space or inode quotas. The account's own files and directories, including private dependency copies, still count. Administrators can check Store usage with `cl-node-modules-storage status`.
+
+Commands such as `npm install <package>`, `npm update`, `npm uninstall`, `npm ci` and `npm rebuild` use regular npm. They first make private copies of shared dependencies, which can increase disk and quota use. A supported `npm install` can share the files again.
+
+See [Store limitations](./#store-limitations) for applications that need regular npm.
+
+#### **Enabling the Store**
+
+As **root**, enable the Store on the same filesystem as the account homes. For the default location:
+
+<div class="notranslate">
+
+```
+cl-node-modules-storage enable
+```
+</div>
+
+For homes on a separate `/home` filesystem, use:
+
+<div class="notranslate">
+
+```
+cl-node-modules-storage enable --storage-path /home/.cl-node-modules-storage
+```
+</div>
+
+For several filesystems, add a store on each with `cl-node-modules-storage storage-list --add PATH[,PATH...]`, then run `enable`. Every non-excluded account must have a store on its home filesystem before the feature can be enabled.
+
+Check the result:
+
+<div class="notranslate">
+
+```
+cl-node-modules-storage status
+```
+</div>
+
+Look for `feature_status: enabled`, `socket_activation: active` and `storages[].usable: true`. Read any `warnings`. `standby` is normal: the service starts when needed.
+
+Existing applications use the Store on their next supported install; enabling it does not change their current files.
+
+#### **Using the Store**
+
+In the panel, open **Node.js Selector**, select the application, and click **Run NPM Install**. Selector then restarts and checks the application. If this check fails, the newly installed dependencies stay in place.
+
+Over SSH, sign in as the application owner. Activate the Selector environment with the command shown by the panel, go to the application directory, and run:
+
+<div class="notranslate">
+
+```
+npm install
+```
+</div>
+
+`npm i` also works. Use no extra arguments, and run it in the Selector environment. SSH installs do not restart or check the application.
+
+To use regular npm for an account, the administrator can run:
+
+<div class="notranslate">
+
+```
+cl-node-modules-storage exclude-list --add USER
+```
+</div>
+
+Replace `USER` with the account name. This applies to all its applications. Use `exclude-list --remove USER` to enable shared installs for it again.
+
+#### **Converting existing applications**
+
+Administrators can migrate an existing application. First check eligibility and health without changing its dependencies:
+
+<div class="notranslate">
+
+```
+cloudlinux-selector migrate --json --interpreter nodejs --user <username> --app-root <application root> --dry-run
+```
+</div>
+
+If eligible, run the command without `--dry-run`. Migration keeps the previous dependencies until the application passes its health check and restores them if the check fails. For non-web applications, use `--skip-web-check`.
+
+If migration is interrupted, check the result and migration log before retrying.
+
+#### **Store configuration**
+
+Use `cl-node-modules-storage` to change settings. Add it before each command below.
+
+| Setting | Command | Default | Meaning |
+|---|---|---|---|
+| storage directories | `storage-list --add PATH` / `--remove PATH`, or `set --storage-path PATH` | `/var/lib/cl-node-modules-storage` | one storage directory per filesystem that holds account homes |
+| allowed registry | `set --allowed-registries URL` | `https://registry.npmjs.org/` | package source; changing it requires an empty store |
+| excluded accounts | `exclude-list --add USER` / `--remove USER` | none | accounts that always use plain npm |
+| deliveries per account per hour / day | `set --deliveries-per-hour N`, `set --deliveries-per-day N` | 60 / 200 | shared installs allowed per account; further requests fail with a rate-limit message |
+| concurrent deliveries | `set --concurrent-deliveries N` | 4 | simultaneous installs; at most one per account |
+| delivery queue timeout | `set --delivery-queue-timeout SECONDS` | 120 | maximum wait for a free install slot |
+| soft storage limit | `set --soft-storage-limit-gb GB` | 0 (off) | rejects new shared installs when recorded storage usage exceeds this size; installs already running may exceed it |
+
+After changing `concurrent-deliveries` or `delivery-queue-timeout`, run `systemctl try-restart cl-bun-deliveryd.service`. Other settings apply to the next install.
+
+#### **Monitoring and maintenance**
+
+<div class="notranslate">
+
+```
+cl-node-modules-storage status
+```
+</div>
+
+Shows settings, storage usage, and how many accounts and applications use the Store. Read any warnings; `stale` means the measurement is incomplete and actual usage may be higher. With <span class="notranslate">lve-utils 6.6.42-1</span> or later, `cloudlinux-summary` includes some of these metrics as `shared_node_modules_*` fields.
+
+**Pruning.** Remove cached packages that no application uses:
+
+<div class="notranslate">
+
+```
+cl-node-modules-storage prune
+```
+</div>
+
+Cleanup also runs daily through <span class="notranslate">`cl-node-modules-storage-prune.timer`</span>. Packages still used by applications are kept.
+
+**Shared files.** Avoid recursive ownership or permission changes (`chown -R`, `chmod -R`) inside shared `node_modules`: they affect other applications using the same files. If `status` reports ownership warnings, check those changes; `prune` does not repair them.
+
+**Logs.** Installs: <span class="notranslate">`/var/log/cloudlinux/bun-delivery.log`</span>. Migrations: <span class="notranslate">`/var/log/cloudlinux/cl-bun-migration.log`</span>. To clean up temporary files left by interrupted installs, run `cl-node-modules-storage reclaim-staging`. Check its result: some files may be kept for recovery.
+
+#### **Disabling the Store**
+
+<div class="notranslate">
+
+```
+cl-node-modules-storage disable
+```
+</div>
+
+Future installs use regular npm. Applications keep running. The next command that changes dependencies, such as `npm install`, makes private copies of their shared files. The store and `cl-bun` package are kept; `prune` removes unused cached packages.
+
+Keep <span class="notranslate">`cl-bun-deliveryd.socket`</span> active: npm needs it to make private copies, even after disabling the Store. If `cl-bun` is removed while the Store is enabled, shared installs fail. Run `cl-node-modules-storage enable` to reinstall it, or `disable` to use regular npm.
+
+#### **Store limitations**
+
+* **Supported commands:** `cloudlinux-selector install-modules` and `npm install`/`npm i` without extra arguments in the Selector environment. Other commands use regular npm, making shared files private if needed.
+* **Regular npm fallback:** applications with no dependencies, `npm-shrinkwrap.json`, a v1 `package-lock.json`, `workspaces`, `patchedDependencies`, or a symlinked manifest/lockfile. Updating a v1 lockfile requires newer npm; npm 6 keeps the old format.
+* **npm aliases:** supported for packages from the allowed registry. With npm 6 (Node.js 14 and older), a Store install fails for an alias that needs an install script. Select Node.js 16 or newer for the application, or ask the administrator to exclude the account.
+* **Package sources:** one registry per server (default: `https://registry.npmjs.org/`). Git dependencies, local paths, tarball URLs and other registries (including private registries and `.npmrc` overrides) are refused with a reason; there is no automatic fallback to npm. The administrator can run `cl-node-modules-storage exclude-list --add <username>` for accounts that need these sources. Changing the registry requires an empty store.
+* **Install scripts:** if a required install script fails, the Store stops the install and restores the previous dependencies. Some dependencies that npm treats as optional are required by the Store, so their script failures also stop the install. The administrator can exclude the account to use regular npm.
+* **Backups and transfers:** restored dependencies may be private copies and use more disk space and quota. A supported `npm install` can share them again if the destination has the Store enabled.
+
+
+
 ### Node.js deployment
 
 

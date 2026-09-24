@@ -2252,6 +2252,53 @@ Common output for all <span class="notranslate"> _set_ </span> commands:
 To resolve issues related to <span class="notranslate"> _install-version/uninstall-version_ </span> commands (because they are running in the background) you may use this log file <span class="notranslate"> _/var/log/cl-nodejs-last-yum.log_ </span>
 It contains full <span class="notranslate"> _yum_ </span> output from the <span class="notranslate"> **_latest_** </span> performed operation (install or uninstall) and it will be rewritten with each operation.
 
+**Shared node_modules Store**
+
+The administrator utility of the [Shared node_modules Store](/cloudlinuxos/cloudlinux_os_components/#shared-node-modules-store). Every command prints JSON.
+
+<div class="notranslate">
+
+```
+cl-node-modules-storage status
+cl-node-modules-storage enable [--storage-path PATH] [--soft-storage-limit-gb GB]
+cl-node-modules-storage disable
+cl-node-modules-storage set [--storage-path PATH] [--allowed-registries URL]
+                            [--deliveries-per-hour N] [--deliveries-per-day N]
+                            [--concurrent-deliveries N] [--delivery-queue-timeout SECONDS]
+                            [--soft-storage-limit-gb GB]
+cl-node-modules-storage storage-list [--add PATH[,PATH...]] [--remove PATH[,PATH...]]
+cl-node-modules-storage exclude-list [--add USER[,USER...]] [--remove USER[,USER...]]
+cl-node-modules-storage prune
+cl-node-modules-storage reclaim-staging [--storage PATH]
+cl-node-modules-storage reconcile
+```
+</div>
+
+| Command | Description |
+|---|---|
+| `status` | configuration, daemon state, per-storage usage (`used_bytes`, `allocated_bytes`, `shared_inodes`, `shared_links`, `deduplication_ratio`, `estimated_saved_bytes`, `poisoned_entries`, `retained_staging`, `stale`) and the server-wide `telemetry` block (`active_users`, `active_applications`, `eligible_users`, `eligible_applications`) |
+| `enable` / `disable` | switch the Store on or off for all accounts; `disable` leaves already shared applications running and converts each of them back to a private tree on its next npm command that modifies dependencies |
+| `set` | change one setting; `--allowed-registries` accepts exactly one registry URL and requires an empty store |
+| `storage-list` | show or edit the storage directories (one per filesystem that holds account homes) |
+| `exclude-list` | show or edit the accounts that always use plain npm |
+| `prune` | remove store entries no application references; also runs daily from `cl-node-modules-storage-prune.timer`. Reports `removed`, `kept`, `skipped` and `poisoned` entries |
+| `reclaim-staging` | attempt to remove abandoned staging directories (see `retained_staging` in `status`); preserve directories protected by migration journals and report removed, skipped and failed entries |
+| `reconcile` | re-validate the storage directories and publish their filesystem identity; runs automatically before the delivery service starts |
+
+Convert an existing application to the Store (dry run first):
+
+<div class="notranslate">
+
+```
+cloudlinux-selector migrate --json --interpreter nodejs --user <username> --app-root <application root> --dry-run
+cloudlinux-selector migrate --json --interpreter nodejs --user <username> --app-root <application root> [--skip-web-check]
+```
+</div>
+
+The dry run checks eligibility and application health without replacing dependencies. The real run keeps the previous `node_modules` until the rebuilt application passes its health check and records progress for recovery after an interruption. Check the result and migration log before retrying an interrupted conversion. `--skip-web-check` skips the HTTP health check for applications that do not serve web requests.
+
+
+
 #### **End user**
 
 ::: danger
